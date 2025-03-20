@@ -116,7 +116,7 @@ def main():
 
             result = generate_new_content(source_content, target_content)
 
-            logger.info(f"Processing '{working_file_path}': {result.stdout}"))
+            logger.info(f"Processing '{working_file_path}': {result.stdout}")
             if result.returncode != 0:
                 logger.error(f"Mimic execution failed for '{working_file_path}': {result.stderr}")
                 continue

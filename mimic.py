@@ -61,8 +61,8 @@ def main():
         # Change working directory to /workspace
         os.chdir("/github/workspace")
 
-        copy_file_location = os.environ['INPUT_SOURCE']
-        paste_file_location = os.environ['INPUT_TARGET']
+        input_folder = os.environ['INPUT_INPUT_FOLDER']
+        output_folder = os.environ['INPUT_OUTPUT_FOLDER']
         branch = os.getenv("INPUT_BRANCH_NAME") 
         git_username = os.environ.get('INPUT_GIT_USERNAME', 'github-actions[bot]')  # Mapped from action.yml
         git_email = os.environ.get('INPUT_GIT_EMAIL', 'github-actions[bot]@users.noreply.github.com')  # Mapped from action.yml
@@ -107,12 +107,15 @@ def main():
         # Process each Mimic file
         for mimic_file in mimic_files:
             working_file_path = os.path.join(root_dir, input_folder, mimic_file)
-            target_file_name = mimic_file.replace(".mimic",.{file_ext})
+            target_file_name = mimic_file.replace(".mimic",".{file_ext}")
             target_file_path = os.path.join(root_dir, output_folder, target_file_name)
 
+            target_decode = target_file_path.decode('utf-8')
+            source_decode = working_file_path.decode('utf-8')
+
             # Get file contents
-            target_content = target_file_path.content
-            source_content = working_file_path.content
+            target_content = target_decode.content
+            source_content = source_decode.content
 
             result = generate_new_content(source_content, target_content)
 

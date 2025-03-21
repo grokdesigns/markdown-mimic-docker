@@ -63,7 +63,7 @@ def main():
 
         input_folder = os.environ['INPUT_INPUT_FOLDER']
         output_folder = os.environ['INPUT_OUTPUT_FOLDER']
-        branch = os.getenv("INPUT_BRANCH_NAME") 
+        branch_name = os.getenv("INPUT_BRANCH_NAME") 
         git_username = os.environ.get('INPUT_GIT_USERNAME', 'github-actions[bot]')  # Mapped from action.yml
         git_email = os.environ.get('INPUT_GIT_EMAIL', 'github-actions[bot]@users.noreply.github.com')  # Mapped from action.yml
         commit_message = os.environ.get('INPUT_COMMIT_MESSAGE', '🤖 - Updated via Markdown Mimic')  # Mapped from action.yml
@@ -75,9 +75,10 @@ def main():
         subprocess.run(["git", "config", "--global", "--add", "user.email", git_email])
         subprocess.run(["git", "config", "--global", "--add", "user.name", git_username])
 
-        # Stripping leading and trailing slashes
-        input_folder = input_folder.strip('/')
-        output_folder = output_folder.strip('/')
+        # Stripping leading and trailing slashes, and leading periods.
+        input_folder = input_folder.rstrip('/').lstrip('/')  # Remove trailing and leading slashes
+        output_folder = output_folder.rstrip('/').lstrip('/')  # Remove trailing and leading slashes
+        file_ext = file_ext.lstrip('.')  # Remove leading periods only
 
         # Log the resolved input/output paths
         logger.info(f"SRCFOLDER (Input): {input_folder}")
@@ -90,12 +91,11 @@ def main():
         # Define the full path for the output folder
         output_path = os.path.join(root_dir, output_folder)
 
-        # Create the output folder if it doesn't exist
-        os.makedirs(output_path, exist_ok=True)
-
         # Check if the input folder exists
-        if not os.path.exists(input_folder):
-            raise FileNotFoundError(f"Error: Input directory '{input_folder}' does not exist.")
+        if not os.path.exists(f"./{input_folder}"):
+            raise FileNotFoundError(f"Input directory '{input_folder}' does not exist.")
+        if not os.path.exists(f"./{output_folder}"):
+            raise FileNotFoundError(f"Output directory '{output_folder}' does not exist.")
 
         logger.info("Logging contents of the input folder:")
         for filename in os.listdir(input_folder):
@@ -107,24 +107,25 @@ def main():
         # Process each Mimic file
         for mimic_file in mimic_files:
             working_file_path = os.path.join(root_dir, input_folder, mimic_file)
-            target_file_name = mimic_file.replace(".mimic",".{file_ext}")
+            target_file_name = mimic_file.replace(".mimic", f".{file_ext}")
             target_file_path = os.path.join(root_dir, output_folder, target_file_name)
 
-            target_decode = target_file_path.decode('utf-8')
-            source_decode = working_file_path.decode('utf-8')
-
             # Get file contents
-            target_content = target_decode.content
-            source_content = source_decode.content
+            with open(target_file_path) as target_file:
+                target_content = target_file.read()
+            with open(working_file_path) as source_file:
+                source_content = source_file.read()
 
-            result = generate_new_content(source_content, target_content)
+            try:
+                result = generate_new_content(source_content, target_content)
+                logger.info(f"Processing '{working_file_path}")
+                with open(target_file_path, "w") as target_file:
+                    target_file.write(result)
+            except Exception as e:
+                logger.error(f"Error generating new content for '{target_file_path}': {str(e)}")
+                continue  # Go to the next file in case of an error
 
-            logger.info(f"Processing '{working_file_path}': {result.stdout}")
-            if result.returncode != 0:
-                logger.error(f"Mimic execution failed for '{working_file_path}': {result.stderr}")
-                continue
-
-            logger.info(f"Mimic executed successfully for '{working_file_path}'")
+            logger.info(f"Mimic executed successfully for '{target_file_path}'")
 
         logger.info("Generated files in output directory:")
         log_files_in_directory(output_path)

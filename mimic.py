@@ -2,6 +2,7 @@ import os
 import logging
 import re
 import subprocess
+import datetime
 from pathlib import Path
 import shutil
 
@@ -36,24 +37,36 @@ def log_files_in_directory(directory):
         else:
             logger.info(f"  - {item}, Size: {os.path.getsize(item_path)} bytes")
 
-def git_commit_push(commit_message, branch_name):
-    """Stages and pushes changes to the repository."""
-    # Change to the working directory for git
-    os.chdir("/github/workspace")
-    # Stage all changes
-    subprocess.run(["git", "add", '.'], check=True)
-
-    # Commit changes
-    try:
-        subprocess.run(["git", "commit", "-m", commit_message], check=True)
-    except subprocess.CalledProcessError:
-        logger.info("No changes to commit.")
-        return
-
-    # Push changes back to the repository, specifying the branch
+def git_commit_push(commit_message, branch_name=None):
+    """Commit and push changes to GitHub."""
     github_token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY")
-    subprocess.run(["git", "push", f"https://x-access-token:{github_token}@github.com/{repo}.git", f"HEAD:{branch_name}"], check=True)
+    
+    # Check if there are changes to commit
+    status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
+    
+    if status.stdout.strip():
+        logger.info("Changes detected, committing...")
+        # There are changes to commit
+        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "commit", "-m", commit_message], check=True)
+        
+        # Create a unique branch for each update
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        new_branch = f"mimic-update-{timestamp}"
+        
+        # Create and checkout the new branch
+        subprocess.run(["git", "checkout", "-b", new_branch], check=True)
+        
+        # Push to the new branch
+        push_url = f"https://x-access-token:{github_token}@github.com/{repo}.git"
+        subprocess.run(["git", "push", push_url, new_branch], check=True)
+        
+        logger.info(f"Changes pushed to new branch: {new_branch}")
+        
+        # If you want to create a PR automatically, you'd need to use the GitHub API here
+    else:
+        logger.info("No changes to commit.")
 
 def generate_new_content(source_content, target_content, start_tag, end_tag):
     """Generate new content by replacing the marked section"""
@@ -146,13 +159,11 @@ def main():
         # Get the list of Mimic files in the input folder
         mimic_files = [f for f in os.listdir(input_path) if f.endswith('.mimic')]
 
-        # Find all files with the specified extensions 
-        # If overwrite_original is True, search in the entire workspace
-        # Otherwise, search only in the output directory
-        search_path = root_dir if overwrite_original else output_path
-        target_files = find_files_with_extensions(search_path, file_exts)
+        # Find source files to process - always look in the root directory, excluding output folder
+        source_files = find_files_with_extensions(root_dir, file_exts)
+        source_files = [f for f in source_files if not os.path.relpath(f, root_dir).startswith(output_folder)]
         
-        logger.info(f"Found {len(target_files)} potential target files to check")
+        logger.info(f"Found {len(source_files)} potential source files to check")
         
         # Process each Mimic file
         for mimic_file in mimic_files:
@@ -174,41 +185,58 @@ def main():
             # Track modified files for this template
             modified_files = 0
             
-            # Look for the tags in all target files
-            for target_path in target_files:
+            # Look for the tags in all source files
+            for source_path in source_files:
                 try:
-                    with open(target_path) as target_file:
-                        target_content = target_file.read()
+                    with open(source_path) as source_file:
+                        file_content = source_file.read()
                     
                     # Check if the file contains both tags
-                    if start_tag in target_content and end_tag in target_content:
-                        logger.info(f"Found matching tags in '{target_path}'")
-                        result = generate_new_content(source_content, target_content, start_tag, end_tag)
+                    if start_tag in file_content and end_tag in file_content:
+                        logger.info(f"Found matching tags in '{source_path}'")
                         
-                        # If the content was successfully updated
-                        if result != target_content:
-                            # Write the updated content
-                            if overwrite_original:
-                                # Overwrite the original file
-                                with open(target_path, "w") as target_file:
-                                    target_file.write(result)
-                                logger.info(f"Updated file in place: '{target_path}'")
+                        # Generate updated content
+                        updated_content = generate_new_content(source_content, file_content, start_tag, end_tag)
+                        
+                        # Determine where to write the file
+                        if overwrite_original:
+                            # If we're overwriting originals, check if content changed
+                            if updated_content != file_content:
+                                with open(source_path, "w") as target_file:
+                                    target_file.write(updated_content)
+                                logger.info(f"Updated file in place: '{source_path}'")
+                                modified_files += 1
                             else:
-                                # Write to the output directory
-                                # Calculate relative path from root_dir
-                                rel_path = os.path.relpath(target_path, root_dir)
-                                # Create the new path in the output directory
-                                new_path = os.path.join(output_path, rel_path)
-                                # Ensure the directory structure exists
-                                os.makedirs(os.path.dirname(new_path), exist_ok=True)
-                                # Write the file
-                                with open(new_path, "w") as target_file:
-                                    target_file.write(result)
-                                logger.info(f"Created updated file: '{new_path}'")
+                                logger.info(f"No changes needed for '{source_path}'")
+                        else:
+                            # If not overwriting, determine output path and check if already exists
+                            rel_path = os.path.relpath(source_path, root_dir)
+                            output_file_path = os.path.join(output_path, rel_path)
                             
-                            modified_files += 1
+                            # Check if output file exists and has same content
+                            should_write = True
+                            if os.path.exists(output_file_path):
+                                try:
+                                    with open(output_file_path, 'r') as existing_file:
+                                        existing_content = existing_file.read()
+                                    if existing_content == updated_content:
+                                        logger.info(f"Output file already exists with same content: '{output_file_path}'")
+                                        should_write = False
+                                except Exception as e:
+                                    logger.warning(f"Could not read existing output file: {e}")
+                            
+                            # Write to output if needed
+                            if should_write:
+                                # Ensure the directory structure exists
+                                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+                                
+                                # Write the file
+                                with open(output_file_path, "w") as output_file:
+                                    output_file.write(updated_content)
+                                logger.info(f"Created/updated output file: '{output_file_path}'")
+                                modified_files += 1
                 except Exception as e:
-                    logger.error(f"Error processing '{target_path}': {str(e)}")
+                    logger.error(f"Error processing '{source_path}': {str(e)}")
             
             logger.info(f"Template {mimic_file} updated {modified_files} files")
         

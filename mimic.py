@@ -75,10 +75,10 @@ def main():
         subprocess.run(["git", "config", "--global", "--add", "user.email", git_email])
         subprocess.run(["git", "config", "--global", "--add", "user.name", git_username])
 
-        # Stripping leading and trailing slashes, and leading periods.
-        input_folder = input_folder.rstrip('/').lstrip('/')  # Remove trailing and leading slashes
-        output_folder = output_folder.rstrip('/').lstrip('/')  # Remove trailing and leading slashes
-        file_ext = file_ext.lstrip('.')  # Remove leading periods only
+        # Remove leading and trailing slashes, and leading periods.
+        input_folder = re.sub(r'^/|/$', '', input_folder)  # Remove leading and trailing slashes
+        output_folder = re.sub(r'^/|/$', '', output_folder)  # Remove leading and trailing slashes
+        file_ext = re.sub(r'^\.+', '', file_ext)  # Remove multiple leading periods
 
         # Log the resolved input/output paths
         logger.info(f"SRCFOLDER (Input): {input_folder}")

@@ -132,8 +132,7 @@ def main():
     parser.add_argument('--depth', type=int, default=3, help='Maximum directory depth')
     parser.add_argument('--breadth', type=int, default=4, help='Maximum subdirectories per directory')
     parser.add_argument('--files', type=int, default=50, help='Total number of files to create')
-    parser.add_argument('--min-tag-files', type=int, default=10,
-                        help='Minimum number of text files with MIMIC tags')
+    parser.add_argument('--min-tag-files', type=int, default=10, help='Minimum number of text files with MIMIC tags')
     
     args = parser.parse_args()
     

@@ -193,7 +193,7 @@ def main():
                     
                     # Check if the file contains both tags
                     if start_tag in file_content and end_tag in file_content:
-                        logger.info(f"Found matching tags in '{source_path}'")
+                        logger.debug(f"Found matching tags in '{source_path}'")
                         
                         # Generate updated content
                         updated_content = generate_new_content(source_content, file_content, start_tag, end_tag)
@@ -204,7 +204,7 @@ def main():
                             if updated_content != file_content:
                                 with open(source_path, "w") as target_file:
                                     target_file.write(updated_content)
-                                logger.info(f"Updated file in place: '{source_path}'")
+                                logger.debug(f"Updated file in place: '{source_path}'")
                                 modified_files += 1
                             else:
                                 logger.info(f"No changes needed for '{source_path}'")
@@ -220,7 +220,7 @@ def main():
                                     with open(output_file_path, 'r') as existing_file:
                                         existing_content = existing_file.read()
                                     if existing_content == updated_content:
-                                        logger.info(f"Output file already exists with same content: '{output_file_path}'")
+                                        logger.debug(f"Output file already exists with same content: '{output_file_path}'")
                                         should_write = False
                                 except Exception as e:
                                     logger.warning(f"Could not read existing output file: {e}")

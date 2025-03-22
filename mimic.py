@@ -10,21 +10,22 @@ import shutil
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-root_dir = '/github/workspace/'
+root_dir = os.environ.get('GITHUB_WORKSPACE', '/github/workspace')
 
 def setup_git():
     # Configure Git for operation. #
-    subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/github/workspace"])
+    subprocess.run(["git", "config", "--global", "--add", "safe.directory", root_dir])
     
     # Set Git user credentials
     git_username = os.environ.get('INPUT_GIT_USERNAME', 'github-actions[bot]')
     git_email = os.environ.get('INPUT_GIT_EMAIL', 'github-actions[bot]@users.noreply.github.com')
+
     subprocess.run(["git", "config", "--global", "--add", "user.email", git_email])
     subprocess.run(["git", "config", "--global", "--add", "user.name", git_username])
     
     # Example of adding files to Git
     try:
-        result = subprocess.run(["git", "add", "."], capture_output=True, text=True, cwd="/github/workspace")
+        result = subprocess.run(["git", "add", "."], capture_output=True, text=True, cwd=root_dir)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to add files: {result.stderr}")
     except Exception as e:
@@ -71,10 +72,17 @@ def git_commit_push(commit_message, branch_name=None):
         logger.info("No changes to commit.")
 
 def copy_files_to_output(source_files, output_path):
-    # Copy the source files to the output directory. #
+    # Copy the source files to the output directory.
     for source_path in source_files:
-        rel_path = os.path.relpath(source_path, root_dir)  # Keep the relative path from the root dir
-        output_file_path = os.path.join(output_path, rel_path)  # Combine with output path
+        # Create a relative path but ensure it doesn't include the output directory itself
+        rel_path = os.path.relpath(source_path, root_dir)
+        
+        # Prevent adding the output directory to itself; just use the original relative path
+        if rel_path.startswith(output_path):
+            continue  # Skip copying files that are already under the output path
+        
+        # Create the output file path by removing the leading parts of the path that are not needed
+        output_file_path = os.path.join(output_path, rel_path)  # Output path destination
         
         # Ensure the output directory structure exists
         os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
@@ -101,10 +109,15 @@ def get_template_identifier(mimic_file):
     identifier = os.path.splitext(mimic_file)[0].upper()
     return identifier
 
-def find_files_with_extensions(directory, extensions):
-    # Find all files with the specified extensions in the directory and its subdirectories. #
+def find_files_with_extensions(directory, extensions, exclude_dirs=None):
+    # Find all files with the specified extensions in the directory and its subdirectories. 
     matching_files = []
-    for root, _, files in os.walk(directory):
+    exclude_dirs = exclude_dirs or []
+    
+    for root, dirs, files in os.walk(directory):
+        # Filter out the directories to exclude from being traversed
+        dirs[:] = [d for d in dirs if os.path.join(root, d) not in exclude_dirs]
+        
         for file in files:
             if any(file.endswith(f".{ext}") for ext in extensions):
                 matching_files.append(os.path.join(root, file))
@@ -120,9 +133,7 @@ def main():
     # Execute the Mimic Processing Workflow. #
     try:
         # Change working directory to /workspace
-        os.chdir("/github/workspace")
-
-        os.chdir("/github/workspace")
+        os.chdir(root_dir)
 
         input_folder = os.environ['INPUT_INPUT_FOLDER']
         output_folder = os.environ['INPUT_OUTPUT_FOLDER']
@@ -162,9 +173,6 @@ def main():
         # Check if the input folder exists
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input directory '{input_folder}' does not exist.")
-        
-        if not overwrite_original:
-            ensure_directory_exists(output_path)
 
         logger.info("Logging contents of the input folder:")
         for filename in os.listdir(input_path):
@@ -172,8 +180,8 @@ def main():
 
         mimic_files = [f for f in os.listdir(input_path) if f.endswith('.mimic')]
         
-        # Gather source files
-        source_files = find_files_with_extensions(root_dir, file_exts)
+        # Gather source files and exclude the output folder
+        source_files = find_files_with_extensions(root_dir, file_exts, exclude_dirs=[output_path])
         source_files = [f for f in source_files if not os.path.relpath(f, root_dir).startswith(output_folder)]
         
         logger.info(f"Found {len(source_files)} potential source files to check")

@@ -10,8 +10,10 @@ import shutil
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+root_dir = '/github/workspace/'
+
 def setup_git():
-    """Configure Git for operation."""
+    # Configure Git for operation. #
     subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/github/workspace"])
     
     # Set Git user credentials
@@ -29,7 +31,7 @@ def setup_git():
         logger.error(f"Git error occurred: {e}")
 
 def log_files_in_directory(directory):
-    """Logs all files in the specified directory."""
+    # Logs all files in the specified directory. #
     for item in os.listdir(directory):
         item_path = os.path.join(directory, item)
         if os.path.isdir(item_path):
@@ -38,7 +40,7 @@ def log_files_in_directory(directory):
             logger.info(f"  - {item}, Size: {os.path.getsize(item_path)} bytes")
 
 def git_commit_push(commit_message, branch_name=None):
-    """Commit and push changes to GitHub."""
+    # Commit and push changes to GitHub. #
     github_token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY")
     
@@ -68,8 +70,21 @@ def git_commit_push(commit_message, branch_name=None):
     else:
         logger.info("No changes to commit.")
 
+def copy_files_to_output(source_files, output_path):
+    # Copy the source files to the output directory. #
+    for source_path in source_files:
+        rel_path = os.path.relpath(source_path, root_dir)
+        output_file_path = os.path.join(output_path, rel_path)
+        
+        # Ensure the output directory structure exists
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        
+        # Copy file to the output directory
+        shutil.copy2(source_path, output_file_path)
+        logger.info(f"Copied '{source_path}' to '{output_file_path}'")
+
 def generate_new_content(source_content, target_content, start_tag, end_tag):
-    """Generate new content by replacing the marked section"""
+    # Generate new content by replacing the marked section #
     pattern = f"{start_tag}[\\s\\S]+?{end_tag}"
     replacement = f"{start_tag}\n{source_content}\n{end_tag}"
     
@@ -81,13 +96,13 @@ def generate_new_content(source_content, target_content, start_tag, end_tag):
         return target_content
 
 def get_template_identifier(mimic_file):
-    """Extract an identifier from the mimic filename to use in tags."""
+    # Extract an identifier from the mimic filename to use in tags. #
     # Remove .mimic extension and convert to uppercase for the tag
     identifier = os.path.splitext(mimic_file)[0].upper()
     return identifier
 
 def find_files_with_extensions(directory, extensions):
-    """Find all files with the specified extensions in the directory and its subdirectories."""
+    # Find all files with the specified extensions in the directory and its subdirectories. #
     matching_files = []
     for root, _, files in os.walk(directory):
         for file in files:
@@ -96,15 +111,17 @@ def find_files_with_extensions(directory, extensions):
     return matching_files
 
 def ensure_directory_exists(directory_path):
-    """Ensure that a directory exists, creating it if necessary."""
+    # Ensure that a directory exists, creating it if necessary. #
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
         logger.info(f"Created directory: {directory_path}")
 
 def main():
-    """Execute the Mimic Processing Workflow."""
+    # Execute the Mimic Processing Workflow. #
     try:
         # Change working directory to /workspace
+        os.chdir("/github/workspace")
+
         os.chdir("/github/workspace")
 
         input_folder = os.environ['INPUT_INPUT_FOLDER']
@@ -120,8 +137,6 @@ def main():
         # Get file extensions as a comma-separated list and convert to a list
         file_exts_str = os.environ.get('INPUT_FILE_EXTS', 'md')
         file_exts = [ext.strip() for ext in file_exts_str.split(',')]
-        
-        root_dir = '/github/workspace/'
 
         # Set up git configuration
         setup_git()
@@ -148,7 +163,6 @@ def main():
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input directory '{input_folder}' does not exist.")
         
-        # If not overwriting, ensure output directory exists
         if not overwrite_original:
             ensure_directory_exists(output_path)
 
@@ -156,23 +170,22 @@ def main():
         for filename in os.listdir(input_path):
             logger.info(f"  - {filename}")
 
-        # Get the list of Mimic files in the input folder
         mimic_files = [f for f in os.listdir(input_path) if f.endswith('.mimic')]
-
-        # Find source files to process - always look in the root directory, excluding output folder
+        
+        # Gather source files
         source_files = find_files_with_extensions(root_dir, file_exts)
         source_files = [f for f in source_files if not os.path.relpath(f, root_dir).startswith(output_folder)]
         
         logger.info(f"Found {len(source_files)} potential source files to check")
         
-        # Process each Mimic file
+        # If not overwriting, copy files to the output folder first
+        if not overwrite_original:
+            copy_files_to_output(source_files, output_path)
+
+        # Now we can process the templates
         for mimic_file in mimic_files:
             mimic_path = os.path.join(input_path, mimic_file)
-            
-            # Get the identifier for this template
             identifier = get_template_identifier(mimic_file)
-            
-            # Define the start and end tags for this template
             start_tag = f"<!--MIMIC_{identifier}_START-->"
             end_tag = f"<!--MIMIC_{identifier}_END-->"
             
@@ -184,9 +197,10 @@ def main():
             
             # Track modified files for this template
             modified_files = 0
-            
-            # Look for the tags in all source files
-            for source_path in source_files:
+
+            # Look for the tags in all source files in the output path
+            target_files = find_files_with_extensions(output_path, file_exts)
+            for source_path in target_files:
                 try:
                     with open(source_path) as source_file:
                         file_content = source_file.read()
@@ -198,49 +212,31 @@ def main():
                         # Generate updated content
                         updated_content = generate_new_content(source_content, file_content, start_tag, end_tag)
                         
-                        # Determine where to write the file
-                        if overwrite_original:
-                            # If we're overwriting originals, check if content changed
-                            if updated_content != file_content:
-                                with open(source_path, "w") as target_file:
-                                    target_file.write(updated_content)
-                                logger.debug(f"Updated file in place: '{source_path}'")
-                                modified_files += 1
-                            else:
-                                logger.info(f"No changes needed for '{source_path}'")
-                        else:
-                            # If not overwriting, determine output path and check if already exists
-                            rel_path = os.path.relpath(source_path, root_dir)
-                            output_file_path = os.path.join(output_path, rel_path)
-                            
-                            # Check if output file exists and has same content
-                            should_write = True
-                            if os.path.exists(output_file_path):
-                                try:
-                                    with open(output_file_path, 'r') as existing_file:
-                                        existing_content = existing_file.read()
-                                    if existing_content == updated_content:
-                                        logger.debug(f"Output file already exists with same content: '{output_file_path}'")
-                                        should_write = False
-                                except Exception as e:
-                                    logger.warning(f"Could not read existing output file: {e}")
-                            
-                            # Write to output if needed
-                            if should_write:
-                                # Ensure the directory structure exists
-                                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-                                
-                                # Write the file
-                                with open(output_file_path, "w") as output_file:
-                                    output_file.write(updated_content)
-                                logger.info(f"Created/updated output file: '{output_file_path}'")
-                                modified_files += 1
+                        # Write the updated_content to the output file
+                        rel_path = os.path.relpath(source_path, root_dir)
+                        output_file_path = os.path.join(output_path, rel_path)
+
+                        should_write = True
+                        if os.path.exists(output_file_path):
+                            try:
+                                with open(output_file_path, 'r') as existing_file:
+                                    existing_content = existing_file.read()
+                                if existing_content == updated_content:
+                                    logger.debug(f"Output file already exists with same content: '{output_file_path}'")
+                                    should_write = False
+                            except Exception as e:
+                                logger.warning(f"Could not read existing output file: {e}")
+
+                        if should_write:
+                            with open(output_file_path, "w") as output_file:
+                                output_file.write(updated_content)
+                            logger.info(f"Created/updated output file: '{output_file_path}'")
+                            modified_files += 1
                 except Exception as e:
                     logger.error(f"Error processing '{source_path}': {str(e)}")
             
             logger.info(f"Template {mimic_file} updated {modified_files} files")
         
-        # Commit and push changes to GitHub based on SKIP_CI
         if skip_ci.lower() == 'yes':
             commit_message += " [no ci]"
 

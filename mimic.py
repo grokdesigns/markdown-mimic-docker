@@ -73,13 +73,13 @@ def git_commit_push(commit_message, branch_name=None):
 def copy_files_to_output(source_files, output_path):
     # Copy the source files to the output directory. #
     for source_path in source_files:
-        rel_path = os.path.relpath(source_path, root_dir)
-        output_file_path = os.path.join(output_path, rel_path)
+        rel_path = os.path.relpath(source_path, root_dir)  # Keep the relative path from the root dir
+        output_file_path = os.path.join(output_path, rel_path)  # Combine with output path
         
         # Ensure the output directory structure exists
         os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
         
-        # Copy file to the output directory
+        # Copy the file to the output directory
         shutil.copy2(source_path, output_file_path)
         logger.info(f"Copied '{source_path}' to '{output_file_path}'")
 
@@ -183,58 +183,55 @@ def main():
             copy_files_to_output(source_files, output_path)
 
         # Now we can process the templates
+        # Process templates
         for mimic_file in mimic_files:
             mimic_path = os.path.join(input_path, mimic_file)
             identifier = get_template_identifier(mimic_file)
             start_tag = f"<!--MIMIC_{identifier}_START-->"
             end_tag = f"<!--MIMIC_{identifier}_END-->"
-            
+
             logger.info(f"Processing template: {mimic_file} (looking for {start_tag} and {end_tag})")
-            
-            # Read the source content
+
             with open(mimic_path) as source_file:
                 source_content = source_file.read()
-            
-            # Track modified files for this template
+
             modified_files = 0
 
-            # Look for the tags in all source files in the output path
-            target_files = find_files_with_extensions(output_path, file_exts)
+            # Get the list of target files based on the inputs
+            target_files = find_files_with_extensions(root_dir, file_exts)
+
             for source_path in target_files:
                 try:
                     with open(source_path) as source_file:
                         file_content = source_file.read()
-                    
-                    # Check if the file contains both tags
-                    if start_tag in file_content and end_tag in file_content:
-                        logger.debug(f"Found matching tags in '{source_path}'")
-                        
-                        # Generate updated content
+
+                    logger.debug(f"Reading content from '{source_path}': {file_content}")
+
+                    # Check for case insensitive tag matches
+                    if start_tag.lower() in file_content.lower() and end_tag.lower() in file_content.lower():
+                        logger.debug(f"Found matching tags in '{source_path}' (case insensitive)")
+
+                        # Generate the updated content
                         updated_content = generate_new_content(source_content, file_content, start_tag, end_tag)
-                        
-                        # Write the updated_content to the output file
-                        rel_path = os.path.relpath(source_path, root_dir)
-                        output_file_path = os.path.join(output_path, rel_path)
 
-                        should_write = True
-                        if os.path.exists(output_file_path):
-                            try:
-                                with open(output_file_path, 'r') as existing_file:
-                                    existing_content = existing_file.read()
-                                if existing_content == updated_content:
-                                    logger.debug(f"Output file already exists with same content: '{output_file_path}'")
-                                    should_write = False
-                            except Exception as e:
-                                logger.warning(f"Could not read existing output file: {e}")
-
-                        if should_write:
+                        if overwrite_original:
+                            # If overwriting originals, write back to the source file
+                            with open(source_path, "w") as output_file:
+                                output_file.write(updated_content)
+                            logger.info(f"Updated original file: '{source_path}'")
+                        else:
+                            # If not overwriting, write to output folder
+                            output_file_path = os.path.join(output_path, os.path.relpath(source_path, root_dir))
+                            os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
                             with open(output_file_path, "w") as output_file:
                                 output_file.write(updated_content)
                             logger.info(f"Created/updated output file: '{output_file_path}'")
-                            modified_files += 1
+
+                        modified_files += 1
+
                 except Exception as e:
                     logger.error(f"Error processing '{source_path}': {str(e)}")
-            
+
             logger.info(f"Template {mimic_file} updated {modified_files} files")
         
         if skip_ci.lower() == 'yes':
